@@ -4,455 +4,927 @@
 # позволят быстро выполнять данные запросы без дублирования кода SQL.
 
 """
-School ORM System
-Этот модуль предоставляет объектно-реляционное отображение (ORM)
-для базы данных. ORM позволяет работать с базой данных
-используя объекты Python вместо прямого написания SQL запросов.
-
-Основные компоненты системы:
-- DatabaseManager: управление соединением с БД и выполнение запросов
-- StudentManager: операции со студентами (CRUD и специализированные запросы)
-- CourseManager: операции с курсами (CRUD)
-- SchoolORM: основной класс ORM, предоставляющий единую точку доступа
-
-Особенности:
-- Использование контекстных менеджеров для безопасной работы с БД
-- Параметризованные запросы для защиты от SQL-инъекций
-- Типизация для улучшения читаемости и поддержки кода
-- Поддержка основных операций без дублирования SQL кода
+School ORM System - Уровень 3
+🎓 Объектно-реляционное отображение (ORM) для школьной базы данных.
 """
 
 import sqlite3
-from typing import List, Tuple, Optional, Any
+import os
+from typing import List, Optional, Protocol
+from dataclasses import dataclass
 
+# =============================================================================
+# PROTOCOLS (ПРОТОКОЛЫ ДЛЯ ТИПИЗАЦИИ)
+# =============================================================================
+
+class StudentProtocol(Protocol):
+    """Протокол для типизации объектов студента"""
+    id: Optional[int]
+    name: str
+    surname: str
+    age: int
+    city: str
+
+
+class CourseProtocol(Protocol):
+    """Протокол для типизации объектов курса"""
+    id: Optional[int]
+    name: str
+    time_start: str
+    time_end: str
+
+# =============================================================================
+# ENTITY LAYER (СЛОЙ СУЩНОСТЕЙ)
+# =============================================================================
+
+@dataclass
+class Student:
+    """
+    Сущность студента - объектное представление строки таблицы Students.
+    Реализует StudentProtocol для типизации.
+    """
+    id: Optional[int] = None
+    name: str = ""
+    surname: str = ""
+    age: int = 0
+    city: str = ""
+
+    def __str__(self) -> str:
+        return f"{self.name} {self.surname}, {self.age} лет, {self.city}"
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> 'Student':
+        """
+        Создает объект Student напрямую из строки БД.
+        Args:
+            row: Строка результата SQLite запроса
+        Returns:
+            Student: Объект студента
+        """
+        return cls(
+            id=row['id'],
+            name=row['name'],
+            surname=row['surname'],
+            age=row['age'],
+            city=row['city']
+        )
+
+@dataclass
+class Course:
+    """
+    Сущность курса - объектное представление строки таблицы Courses.
+    Реализует CourseProtocol для типизации.
+    """
+    id: Optional[int] = None
+    name: str = ""
+    time_start: str = ""
+    time_end: str = ""
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.time_start} - {self.time_end})"
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> 'Course':
+        """
+        Создает объект Course напрямую из строки БД.
+        Args:
+            row: Строка результата SQLite запроса
+        Returns:
+            Course: Объект курса
+        """
+        return cls(
+            id=row['id'],
+            name=row['name'],
+            time_start=row['time_start'],
+            time_end=row['time_end']
+        )
+
+# =============================================================================
+# REPOSITORY LAYER (СЛОЙ ДОСТУПА К ДАННЫМ)
+# =============================================================================
+
+class StudentRepository:
+    """
+    Репозиторий для работы со студентами в базе данных.
+    """
+
+    def __init__(self, db_connection: sqlite3.Connection):
+        self.db = db_connection
+
+    def create(self, student: StudentProtocol) -> int:
+        """Создает нового студента в базе данных."""
+        cursor = self.db.cursor()
+        cursor.execute(
+            "INSERT INTO Students (name, surname, age, city) VALUES (?, ?, ?, ?)",
+            (student.name, student.surname, student.age, student.city)
+        )
+        self.db.commit()
+        return cursor.lastrowid
+
+    def get_all(self) -> List[Student]:
+        """Получает всех студентов из базы данных."""
+        cursor = self.db.cursor()
+        cursor.execute("SELECT * FROM Students")
+        # Оптимизация: прямой вызов from_row вместо преобразования через dict
+        return [Student.from_row(row) for row in cursor.fetchall()]
+
+    def get_by_id(self, student_id: int) -> Optional[Student]:
+        """Находит студента по его ID."""
+        cursor = self.db.cursor()
+        cursor.execute("SELECT * FROM Students WHERE id = ?", (student_id,))
+        row = cursor.fetchone()
+        return Student.from_row(row) if row else None
+
+    def update(self, student: StudentProtocol) -> bool:
+        """Обновляет данные существующего студента."""
+        if student.id is None:
+            raise ValueError("Нельзя обновить студента без ID")
+
+        cursor = self.db.cursor()
+        cursor.execute(
+            "UPDATE Students SET name = ?, surname = ?, age = ?, city = ? WHERE id = ?",
+            (student.name, student.surname, student.age, student.city, student.id)
+        )
+        self.db.commit()
+        return cursor.rowcount > 0
+
+    def delete(self, student_id: int) -> bool:
+        """Удаляет студента по ID."""
+        cursor = self.db.cursor()
+        cursor.execute("DELETE FROM Students WHERE id = ?", (student_id,))
+        self.db.commit()
+        return cursor.rowcount > 0
+
+    def get_by_age_gt(self, age: int) -> List[Student]:
+        """Находит студентов старше указанного возраста."""
+        cursor = self.db.cursor()
+        cursor.execute("SELECT * FROM Students WHERE age > ?", (age,))
+        return [Student.from_row(row) for row in cursor.fetchall()]
+
+    def get_by_city(self, city: str) -> List[Student]:
+        """Находит студентов из указанного города."""
+        cursor = self.db.cursor()
+        cursor.execute("SELECT * FROM Students WHERE city = ?", (city,))
+        return [Student.from_row(row) for row in cursor.fetchall()]
+
+    def count(self) -> int:
+        """Возвращает общее количество студентов в базе."""
+        cursor = self.db.cursor()
+        cursor.execute("SELECT COUNT(*) as count FROM Students")
+        return cursor.fetchone()['count']
+
+
+class CourseRepository:
+    """
+    Репозиторий для работы с курсами в базе данных.
+    """
+
+    def __init__(self, db_connection: sqlite3.Connection):
+        self.db = db_connection
+
+    def create(self, course: CourseProtocol) -> int:
+        """Создает новый курс в базе данных."""
+        cursor = self.db.cursor()
+        cursor.execute(
+            "INSERT INTO Courses (name, time_start, time_end) VALUES (?, ?, ?)",
+            (course.name, course.time_start, course.time_end)
+        )
+        self.db.commit()
+        return cursor.lastrowid
+
+    def get_all(self) -> List[Course]:
+        """Получает все курсы из базы данных."""
+        cursor = self.db.cursor()
+        cursor.execute("SELECT * FROM Courses")
+        return [Course.from_row(row) for row in cursor.fetchall()]
+
+    def get_by_id(self, course_id: int) -> Optional[Course]:
+        """Находит курс по ID."""
+        cursor = self.db.cursor()
+        cursor.execute("SELECT * FROM Courses WHERE id = ?", (course_id,))
+        row = cursor.fetchone()
+        return Course.from_row(row) if row else None
+
+    def get_by_name(self, name: str) -> Optional[Course]:
+        """Находит курс по точному совпадению имени."""
+        cursor = self.db.cursor()
+        cursor.execute("SELECT * FROM Courses WHERE name = ?", (name,))
+        row = cursor.fetchone()
+        return Course.from_row(row) if row else None
+
+    def count(self) -> int:
+        """Возвращает общее количество курсов в базе."""
+        cursor = self.db.cursor()
+        cursor.execute("SELECT COUNT(*) as count FROM Courses")
+        return cursor.fetchone()['count']
+
+
+class EnrollmentRepository:
+    """
+    Репозиторий для управления связями.
+    """
+
+    def __init__(self, db_connection: sqlite3.Connection):
+        self.db = db_connection
+
+    def enroll(self, student_id: int, course_id: int) -> bool:
+        """Записывает студента на курс."""
+        try:
+            cursor = self.db.cursor()
+            cursor.execute(
+                "INSERT INTO Student_Courses (student_id, course_id) VALUES (?, ?)",
+                (student_id, course_id)
+            )
+            self.db.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+    def unenroll(self, student_id: int, course_id: int) -> bool:
+        """Отписывает студента от курса."""
+        cursor = self.db.cursor()
+        cursor.execute(
+            "DELETE FROM Student_Courses WHERE student_id = ? AND course_id = ?",
+            (student_id, course_id)
+        )
+        self.db.commit()
+        return cursor.rowcount > 0
+
+    def get_students_on_course(self, course_name: str) -> List[Student]:
+        """Находит всех студентов, записанных на указанный курс."""
+        cursor = self.db.cursor()
+        cursor.execute('''
+            SELECT s.* 
+            FROM Students s
+            JOIN Student_Courses sc ON s.id = sc.student_id
+            JOIN Courses c ON sc.course_id = c.id
+            WHERE c.name = ?
+        ''', (course_name,))
+        return [Student.from_row(row) for row in cursor.fetchall()]
+
+    def get_students_on_course_from_city(self, course_name: str, city: str) -> List[Student]:
+        """Находит студентов на курсе из указанного города."""
+        cursor = self.db.cursor()
+        cursor.execute('''
+            SELECT s.* 
+            FROM Students s
+            JOIN Student_Courses sc ON s.id = sc.student_id
+            JOIN Courses c ON sc.course_id = c.id
+            WHERE c.name = ? AND s.city = ?
+        ''', (course_name, city))
+        return [Student.from_row(row) for row in cursor.fetchall()]
+
+# =============================================================================
+# SERVICE LAYER (СЛОЙ БИЗНЕС-ЛОГИКИ)
+# =============================================================================
+
+class SchoolService:
+    """
+    Сервисный слой с бизнес-логикой школы.
+    """
+
+    def __init__(self, db_connection: sqlite3.Connection):
+        self.students = StudentRepository(db_connection)
+        self.courses = CourseRepository(db_connection)
+        self.enrollments = EnrollmentRepository(db_connection)
+
+    def get_students_count(self) -> int:
+        """Возвращает количество студентов через репозиторий."""
+        return self.students.count()
+
+    def get_courses_count(self) -> int:
+        """Возвращает количество курсов через репозиторий."""
+        return self.courses.count()
+
+# =============================================================================
+# DATABASE LAYER (СЛОЙ БАЗЫ ДАННЫХ)
+# =============================================================================
 
 class DatabaseManager:
     """
-    Менеджер базы данных для управления соединениями и выполнения запросов.
-    Этот класс предоставляет абстракцию для работы с SQLite базой данных,
-    включая автоматическое управление соединениями и транзакциями.
-    Attributes:
-        db_name (str): имя файла базы данных
-        conn (sqlite3.Connection): объект соединения с БД
-        cursor (sqlite3.Cursor): курсор для выполнения запросов
+    Менеджер базы данных для управления соединениями и транзакциями.
+    Типизирован с конкретными типами.
     """
 
-    def __init__(self, db_name: str = 'school.db'):
-        """
-        Инициализирует менеджер базы данных.
-
-        Args:
-            db_name (str): путь к файлу базы данных. По умолчанию 'school.db'
-        """
+    def __init__(self, db_name: str = 'school_optimized.db'):
         self.db_name = db_name
         self.conn: Optional[sqlite3.Connection] = None
-        self.cursor: Optional[sqlite3.Cursor] = None
 
-    def __enter__(self) -> 'DatabaseManager':
-        """
-        Вход в контекстный менеджер.
-        Открывает соединение с базой данных и создает курсор.
-        Автоматически вызывается при использовании with.
-        Returns:
-            DatabaseManager: текущий экземпляр менеджера БД
-        """
+    def __enter__(self) -> SchoolService:
+        """Вход в контекстный менеджер."""
         self.conn = sqlite3.connect(self.db_name)
-        self.cursor = self.conn.cursor()
-        return self
+        self.conn.row_factory = sqlite3.Row
+        self._create_tables()
+        return SchoolService(self.conn)
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        """
-        Выход из контекстного менеджера.
-        Автоматически вызывается при выходе из блока with.
-        Выполняет коммит при успешном выполнении или откат при ошибке.
-        Args:
-            exc_type: тип исключения (если было)
-            exc_val: значение исключения (если было)
-            exc_tb: трассировка исключения (если было)
-        """
+    def __exit__(self, exc_type: Optional[type], exc_val: Optional[Exception], exc_tb: Optional[object]) -> None:
+        """Выход из контекстного менеджера."""
         if self.conn:
             if exc_type is None:
-                # Если не было исключения - коммит(им) изменения
                 self.conn.commit()
             else:
-                # Если было исключение - откатываем транзакцию
                 self.conn.rollback()
             self.conn.close()
 
-    def execute_query(self, query: str, params: Tuple = ()) -> List[Tuple]:
-        """
-        Выполняет SQL запрос и возвращает результат.
-        Использует параметризованные запросы для безопасности.
-        Args:
-            query (str): SQL запрос для выполнения
-            params (Tuple): параметры для подстановки в запрос
-        Returns:
-            List[Tuple]: список кортежей с результатами запроса
-        Example:
-import db            >>> results = db.execute_query("SELECT * FROM Students WHERE age > ?", (20,))
-        """
-        self.cursor.execute(query, params)
-        return self.cursor.fetchall()
+    def _create_tables(self) -> None:
+        """Создает таблицы базы данных если они не существуют."""
+        cursor = self.conn.cursor()
 
-    def execute_script(self, script: str) -> None:
-        """
-        Выполняет SQL скрипт, содержащий несколько команд.
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS Students(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                surname TEXT NOT NULL,
+                age INTEGER NOT NULL CHECK (age > 0),
+                city TEXT NOT NULL
+            )
+        ''')
 
-        Полезно для инициализации базы данных или массовых операций.
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS Courses(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                time_start TEXT NOT NULL,
+                time_end TEXT NOT NULL
+            )
+        ''')
 
-        Args:
-            script (str): SQL скрипт для выполнения
-
-        Example:
-             db.execute_script('''
-            ...     CREATE TABLE IF NOT EXISTS Students(id INTEGER PRIMARY KEY);
-            ...     INSERT INTO Students VALUES (1);
-            ... ''')
-        """
-        self.cursor.executescript(script)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS Student_Courses(
+                student_id INTEGER,
+                course_id INTEGER,
+                FOREIGN KEY (student_id) REFERENCES Students(id) ON DELETE CASCADE,
+                FOREIGN KEY (course_id) REFERENCES Courses(id) ON DELETE CASCADE,
+                PRIMARY KEY (student_id, course_id)
+            )
+        ''')
         self.conn.commit()
 
-class StudentManager:
+# =============================================================================
+# UI LAYER (СЛОЙ ПОЛЬЗОВАТЕЛЬСКОГО ИНТЕРФЕЙСА)
+# =============================================================================
+
+def clear_screen() -> None:
+    """Очищает экран терминала."""
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+def print_header(title: str) -> None:
+    """Выводит заголовок с форматированием."""
+    print("=" * 60)
+    print(f"🎓 {title}")
+    print("=" * 60)
+
+def wait_for_enter() -> None:
+    """Ожидает нажатия Enter для продолжения."""
+    input("\n↵ Нажмите Enter чтобы продолжить...")
+
+
+def input_student_data(existing_student: Optional[Student] = None) -> Student:
     """
-    Менеджер для работы со студентами в базе данных.
-    Предоставляет методы для выполнения различных запросов связанных со студентами
-    без необходимости написания прямых SQL запросов.
-    Attributes:
-        db (DatabaseManager): менеджер для выполнения запросов к БД
+    Вводит данные студента с клавиатуры с валидацией.
+    Args:
+        existing_student: Существующий студент для обновления
+    Returns:
+        Student: Объект студента с введенными данными
     """
+    if existing_student:
+        print("\nТекущие данные студента:")
+        print(f"  ID: {existing_student.id}")
+        print(f"  Имя: {existing_student.name}")
+        print(f"  Фамилия: {existing_student.surname}")
+        print(f"  Возраст: {existing_student.age}")
+        print(f"  Город: {existing_student.city}")
+        print("\nВведите новые данные (оставьте пустым чтобы не менять):")
+    else:
+        print("\nВведите данные нового студента:")
 
-    def __init__(self, db_manager: DatabaseManager):
-        """
-        Инициализирует менеджер студентов.
-        Args:
-            db_manager (DatabaseManager): менеджер для работы с БД
-        """
-        self.db = db_manager
+    # Валидация ввода
+    while True:
+        name = input("Имя: ").strip()
+        if name:
+            break
+        print("❌ Имя не может быть пустым")
 
-    def get_all(self) -> List[Tuple]:
-        """
-        Получает всех студентов из базы данных.
-        Returns:
-            List[Tuple]: список всех студентов, где каждый студент представлен кортежем
-            в формате (id, name, surname, age, city)
-        """
-        return self.db.execute_query("SELECT * FROM Students")
+    while True:
+        surname = input("Фамилия: ").strip()
+        if surname:
+            break
+        print("❌ Фамилия не может быть пустой")
 
-    def get_by_age_gt(self, age: int) -> List[Tuple]:
-        """
-        Находит студентов старше указанного возраста.
-        Args:
-            age (int): минимальный возраст (исключающий)
-        Returns:
-            List[Tuple]: список студентов старше указанного возраста
-        """
-        return self.db.execute_query("SELECT * FROM Students WHERE age > ?", (age,))
+    while True:
+        age_input = input("Возраст: ").strip()
+        try:
+            age = int(age_input)
+            if age > 0:
+                break
+            print("❌ Возраст должен быть больше 0")
+        except ValueError:
+            print("❌ Возраст должен быть числом")
 
-    def get_by_city(self, city: str) -> List[Tuple]:
-        """
-        Находит студентов из указанного города.
-        Args:
-            city (str): город для поиска
-        Returns:
-            List[Tuple]: список студентов из указанного города
-        """
-        return self.db.execute_query("SELECT * FROM Students WHERE city = ?", (city,))
+    while True:
+        city = input("Город: ").strip()
+        if city:
+            break
+        print("❌ Город не может быть пустым")
 
-    def get_by_course(self, course_name: str) -> List[Tuple]:
-        """
-        Находит студентов, записанных на указанный курс.
-        Выполняет JOIN между таблицами Students, Student_courses и Courses
-        для нахождения связи между студентами и курсами.
-        Args:
-            course_name (str): название курса для поиска
-        Returns:
-            List[Tuple]: список студентов на указанном курсе
-        """
-        query = '''
-            SELECT s.* 
-            FROM Students s
-            JOIN Student_courses sc ON s.id = sc.student_id
-            JOIN Courses c ON sc.course_id = c.id
-            WHERE c.name = ?
-        '''
-        return self.db.execute_query(query, (course_name,))
+    if existing_student:
+        return Student(
+            id=existing_student.id,
+            name=name,
+            surname=surname,
+            age=age,
+            city=city
+        )
+    else:
+        return Student(
+            name=name,
+            surname=surname,
+            age=age,
+            city=city
+        )
 
-    def get_by_course_and_city(self, course_name: str, city: str) -> List[Tuple]:
-        """
-        Находит студентов на указанном курсе из указанного города.
-        Комбинирует условия по курсу и городу для точного поиска.
-        Args:
-            course_name (str): название курса для поиска
-            city (str): город для поиска
-        Returns:
-            List[Tuple]: список студентов, удовлетворяющих обоим условиям
-        """
-        query = '''
-            SELECT s.* 
-            FROM Students s
-            JOIN Student_courses sc ON s.id = sc.student_id
-            JOIN Courses c ON sc.course_id = c.id
-            WHERE c.name = ? AND s.city = ?
-        '''
-        return self.db.execute_query(query, (course_name, city))
 
-class CourseManager:
+def input_course_data(existing_course: Optional[Course] = None) -> Course:
     """
-    Менеджер для работы с курсами в базе данных.
-    Предоставляет методы для выполнения запросов связанных с курсами.
-    Attributes:
-        db (DatabaseManager): менеджер для выполнения запросов к БД
+    Вводит данные курса с клавиатуры с валидацией.
+    Args:
+        existing_course: Существующий курс для обновления
+    Returns:
+        Course: Объект курса с введенными данными
     """
+    if existing_course:
+        print("\nТекущие данные курса:")
+        print(f"  ID: {existing_course.id}")
+        print(f"  Название: {existing_course.name}")
+        print(f"  Начало: {existing_course.time_start}")
+        print(f"  Конец: {existing_course.time_end}")
+        print("\nВведите новые данные (оставьте пустым чтобы не менять):")
+    else:
+        print("\nВведите данные нового курса:")
 
-    def __init__(self, db_manager: DatabaseManager):
-        """
-        Инициализирует менеджер курсов.
-        Args:
-            db_manager (DatabaseManager): менеджер для работы с БД
-        """
-        self.db = db_manager
+    while True:
+        name = input("Название курса: ").strip()
+        if name:
+            break
+        print("❌ Название курса не может быть пустым")
 
-    def get_all(self) -> List[Tuple]:
-        """
-        Получает все курсы из базы данных.
-        Returns:
-            List[Tuple]: список всех курсов, где каждый курс представлен кортежем
-            в формате (id, name, time_start, time_end)
-        """
-        return self.db.execute_query("SELECT * FROM Courses")
+    while True:
+        time_start = input("Дата начала (дд.мм.гг): ").strip()
+        if time_start:
+            break
+        print("❌ Дата начала не может быть пустой")
 
-    def get_by_name(self, name: str) -> List[Tuple]:
-        """
-        Находит курс по точному совпадению имени.
-        Args:
-            name (str): название курса для поиска
-        Returns:
-            List[Tuple]: информация о найденном курсе
-        """
-        return self.db.execute_query("SELECT * FROM Courses WHERE name = ?", (name,))
+    while True:
+        time_end = input("Дата окончания (дд.мм.гг): ").strip()
+        if time_end:
+            break
+        print("❌ Дата окончания не может быть пустой")
 
-class SchoolORM:
-    """
-    Основной класс ORM для работы с учебной базой данных.
-    Предоставляет единый интерфейс для работы со всеми сущностями системы
-    и управляет жизненным циклом соединения с базой данных.
-    Attributes:
-        db_name (str): имя файла базы данных
-        db_manager (DatabaseManager): менеджер для работы с БД
-        students (StudentManager): менеджер для работы со студентами
-        courses (CourseManager): менеджер для работы с курсами
-    """
+    if existing_course:
+        return Course(
+            id=existing_course.id,
+            name=name,
+            time_start=time_start,
+            time_end=time_end
+        )
+    else:
+        return Course(
+            name=name,
+            time_start=time_start,
+            time_end=time_end
+        )
 
-    def __init__(self, db_name: str = 'school.db'):
-        """
-        Инициализирует ORM систему.
-        Args:
-            db_name (str): путь к файлу базы данных. По умолчанию 'school.db'
-        """
-        self.db_name = db_name
-        self.db_manager: Optional[DatabaseManager] = None
-        self.students: Optional[StudentManager] = None
-        self.courses: Optional[CourseManager] = None
 
-    def __enter__(self) -> 'SchoolORM':
-        """
-        Вход в контекстный менеджер.
-        Создает и настраивает все необходимые менеджеры для работы с БД.
-        Returns:
-            SchoolORM: текущий экземпляр ORM
-        """
-        self.db_manager = DatabaseManager(self.db_name)
-        self.db_manager.__enter__()
-        self.students = StudentManager(self.db_manager)
-        self.courses = CourseManager(self.db_manager)
-        return self
+def show_students_table(students: List[Student]) -> None:
+    """Выводит список студентов в виде форматированной таблицы."""
+    if not students:
+        print("┌─────────────────────────────────────────────┐")
+        print("│             Нет студентов в базе            │")
+        print("└─────────────────────────────────────────────┘")
+        return
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        """
-        Выход из контекстного менеджера.
-        Корректно закрывает соединение с базой данных.
-        Args:
-            exc_type: тип исключения (если было)
-            exc_val: значение исключения (если было)
-            exc_tb: трассировка исключения (если было)
-        """
-        if self.db_manager:
-            self.db_manager.__exit__(exc_type, exc_val, exc_tb)
+    print("┌───┬────────────┬───────────────┬─────┬────────────┐")
+    print("│ID │    Имя     │    Фамилия    │Возр │    Город    │")
+    print("├───┼────────────┼───────────────┼─────┼────────────┤")
 
-    def initialize(self) -> None:
-        """
-        Инициализирует базу данных - создает все необходимые таблицы.
+    for student in students:
+        print(f"│{student.id:3}│{student.name:12}│{student.surname:15}│{student.age:5}│{student.city:12}│")
 
-        Создает три таблицы:
-        - Students: информация о студентах (id, имя, фамилия, возраст, город)
-        - Courses: информация о курсах (id, название, дата начала, дата окончания)
-        - Student_courses: таблица связи многие-ко-многим между студентами и курсами
+    print("└───┴────────────┴───────────────┴─────┴────────────┘")
 
-        Если таблицы уже существуют, они не пересоздаются благодаря IF NOT EXISTS.
-        """
-        with DatabaseManager(self.db_name) as db:
-            db.execute_script('''
-                -- Таблица студентов с основной информацией
-                CREATE TABLE IF NOT EXISTS Students(
-                    id INTEGER PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    surname TEXT NOT NULL, 
-                    age INTEGER CHECK (age > 0),
-                    city TEXT
-                );
 
-                -- Таблица курсов с расписанием
-                CREATE TABLE IF NOT EXISTS Courses(
-                    id INTEGER PRIMARY KEY,
-                    name TEXT UNIQUE NOT NULL,
-                    time_start TEXT,
-                    time_end TEXT
-                );
+def show_courses_table(courses: List[Course]) -> None:
+    """Выводит список курсов в виде форматированной таблицы."""
+    if not courses:
+        print("┌─────────────────────────────────────────────┐")
+        print("│              Нет курсов в базе              │")
+        print("└─────────────────────────────────────────────┘")
+        return
 
-                -- Таблица связи студентов и курсов (многие-ко-многим)
-                CREATE TABLE IF NOT EXISTS Student_courses(
-                    student_id INTEGER,
-                    course_id INTEGER,
-                    FOREIGN KEY (student_id) REFERENCES Students(id) ON DELETE CASCADE,
-                    FOREIGN KEY (course_id) REFERENCES Courses(id) ON DELETE CASCADE,
-                    PRIMARY KEY (student_id, course_id)
-                );
-            ''')
+    print("┌───┬────────────┬────────────┬────────────┐")
+    print("│ID │   Название │   Начало   │   Конец    │")
+    print("├───┼────────────┼────────────┼────────────┤")
 
-    def setup_test_data(self) -> None:
-        """
-        Заполняет базу данных тестовыми данными для демонстрации работы ORM.
-        Очищает существующие данные и добавляет:
-        - 2 курса: Python и Java
-        - 4 студентов с разными характеристиками
-        - Связи между студентами и курсами
-        Это метод предназначен для тестирования и демонстрации возможностей системы.
-        """
-        with DatabaseManager(self.db_name) as db:
-            # Очистка таблиц (в правильном порядке из-за внешних ключей)
-            db.execute_script('''
-                DELETE FROM Student_courses;
-                DELETE FROM Students;
-                DELETE FROM Courses;
-            ''')
+    for course in courses:
+        print(f"│{course.id:3}│{course.name:12}│{course.time_start:12}│{course.time_end:12}│")
 
-            # Добавление тестовых курсов
-            courses_data = [
-                (1, 'python', '2021-07-21', '2021-08-21'),
-                (2, 'java', '2021-07-13', '2021-08-16')
-            ]
-            db.cursor.executemany(
-                "INSERT INTO Courses VALUES (?, ?, ?, ?)",
-                courses_data
-            )
+    print("└───┴────────────┴────────────┴────────────┘")
 
-            # Добавление тестовых студентов
-            students_data = [
-                (1, 'Max', 'Brooks', 24, 'Spb'),
-                (2, 'John', 'Stones', 15, 'Spb'),
-                (3, 'Andy', 'Wings', 45, 'Manchester'),
-                (4, 'Kate', 'Brooks', 34, 'Spb')
-            ]
-            db.cursor.executemany(
-                "INSERT INTO Students VALUES (?, ?, ?, ?, ?)",
-                students_data
-            )
 
-            # Создание связей между студентами и курсами
-            student_courses_data = [
-                (1, 1),  # Max на Python
-                (2, 1),  # John на Python
-                (3, 1),  # Andy на Python
-                (4, 2)  # Kate на Java
-            ]
-            db.cursor.executemany(
-                "INSERT INTO Student_courses VALUES (?, ?)",
-                student_courses_data
-            )
+# =============================================================================
+# MENU SYSTEM (СИСТЕМА МЕНЮ)
+# =============================================================================
 
-            db.conn.commit()
+def menu_manage_students(service: SchoolService) -> None:
+    """Меню управления студентами."""
+    while True:
+        clear_screen()
+        print_header("УПРАВЛЕНИЕ СТУДЕНТАМИ")
+        print(f"📊 В базе: {service.get_students_count()} студентов")
 
-def demonstrate_orm_capabilities() -> None:
-    """
-    Демонстрирует все основные возможности ORM системы.
-    Показывает различные сценарии использования:
-    - Поиск студентов по возрасту
-    - Поиск студентов по курсу
-    - Комбинированные запросы
-    - Получение всех данных
-    """
-    print("=== ДЕМОНСТРАЦИЯ ВОЗМОЖНОСТЕЙ SCHOOL ORM ===\n")
+        print("\nВыберите действие:")
+        print("1. 📋 Показать всех студентов")
+        print("2. 🆕 Добавить нового студента")
+        print("3. ✏  Обновить данные студента")
+        print("4. 🗑  Удалить студента")
+        print("5. 🔍 Найти студента по ID")
+        print("0. ↩  Назад в главное меню")
 
-    # Использование ORM через контекстный менеджер
-    with SchoolORM() as orm:
-        # 1. Все студенты старше 30 лет
-        print("1. Все студенты старше 30 лет:")
-        students_over_30 = orm.students.get_by_age_gt(30)
-        for student in students_over_30:
-            print(f"   - {student[1]} {student[2]}, {student[3]} лет, г. {student[4]}")
+        choice = input("\nВаш выбор: ").strip()
 
-        # 2. Все студенты на курсе Python
-        print("\n2. Все студенты, которые проходят курс по Python:")
-        python_students = orm.students.get_by_course('python')
-        for student in python_students:
-            print(f"   - {student[1]} {student[2]}, {student[3]} лет, г. {student[4]}")
+        if choice == "1":
+            clear_screen()
+            print_header("ВСЕ СТУДЕНТЫ")
+            students = service.students.get_all()
+            show_students_table(students)
+            wait_for_enter()
 
-        # 3. Студенты на курсе Python из Spb
-        print("\n3. Все студенты, которые проходят курс по Python и из Spb:")
-        python_spb_students = orm.students.get_by_course_and_city('python', 'Spb')
-        for student in python_spb_students:
-            print(f"   - {student[1]} {student[2]}, {student[3]} лет")
+        elif choice == "2":
+            clear_screen()
+            print_header("ДОБАВЛЕНИЕ СТУДЕНТА")
+            try:
+                student = input_student_data()
+                student_id = service.students.create(student)
+                print(f"\n✅ Студент успешно добавлен! ID: {student_id}")
+            except Exception as e:
+                print(f"\n❌ Ошибка при добавлении: {e}")
+            wait_for_enter()
 
-        # 4. Все студенты из Spb
-        print("\n4. Все студенты из Spb:")
-        spb_students = orm.students.get_by_city('Spb')
-        for student in spb_students:
-            print(f"   - {student[1]} {student[2]}, {student[3]} лет")
+        elif choice == "3":
+            clear_screen()
+            print_header("ОБНОВЛЕНИЕ СТУДЕНТА")
+            students = service.students.get_all()
+            if not students:
+                print("❌ В базе нет студентов для обновления")
+                wait_for_enter()
+                continue
 
-        # 5. Все курсы
-        print("\n5. Все доступные курсы:")
-        all_courses = orm.courses.get_all()
-        for course in all_courses:
-            print(f"   - {course[1]}: с {course[2]} по {course[3]}")
+            show_students_table(students)
 
-        # 6. Общая статистика
-        print("\n6. Статистика базы данных:")
-        all_students = orm.students.get_all()
-        print(f"   - Всего студентов: {len(all_students)}")
-        print(f"   - Всего курсов: {len(all_courses)}")
-        print(f"   - Студентов старше 30: {len(students_over_30)}")
-        print(f"   - Студентов на Python: {len(python_students)}")
+            try:
+                student_id = int(input("\nВведите ID студента для обновления: "))
+                existing_student = service.students.get_by_id(student_id)
+
+                if not existing_student:
+                    print(f"❌ Студент с ID {student_id} не найден")
+                else:
+                    student = input_student_data(existing_student)
+                    if service.students.update(student):
+                        print("\n✅ Данные студента обновлены!")
+                    else:
+                        print("\n❌ Ошибка при обновлении данных")
+            except ValueError:
+                print("❌ Неверный формат ID")
+            except Exception as e:
+                print(f"❌ Ошибка: {e}")
+
+            wait_for_enter()
+
+        elif choice == "4":
+            clear_screen()
+            print_header("УДАЛЕНИЕ СТУДЕНТА")
+            students = service.students.get_all()
+            if not students:
+                print("❌ В базе нет студентов для удаления")
+                wait_for_enter()
+                continue
+
+            show_students_table(students)
+
+            try:
+                student_id = int(input("\nВведите ID студента для удаления: "))
+
+                confirm = input("Вы уверены? (д/н): ").strip().lower()
+                if confirm in ['д', 'да', 'y', 'yes']:
+                    if service.students.delete(student_id):
+                        print("✅ Студент удален!")
+                    else:
+                        print(f"❌ Студент с ID {student_id} не найден")
+                else:
+                    print("❌ Удаление отменено")
+            except ValueError:
+                print("❌ Неверный формат ID")
+
+            wait_for_enter()
+
+        elif choice == "5":
+            clear_screen()
+            print_header("ПОИСК СТУДЕНТА ПО ID")
+            try:
+                student_id = int(input("Введите ID студента: "))
+                student = service.students.get_by_id(student_id)
+
+                if student:
+                    print(f"\n✅ Найден студент:")
+                    show_students_table([student])
+                else:
+                    print(f"\n❌ Студент с ID {student_id} не найден")
+            except ValueError:
+                print("❌ Неверный формат ID")
+
+            wait_for_enter()
+
+        elif choice == "0":
+            break
+        else:
+            print("❌ Неверный выбор. Попробуйте снова.")
+            wait_for_enter()
+
+
+def menu_manage_courses(service: SchoolService) -> None:
+    """Меню управления курсами."""
+    while True:
+        clear_screen()
+        print_header("УПРАВЛЕНИЕ КУРСАМИ")
+        print(f"📊 В базе: {service.get_courses_count()} курсов")
+
+        print("\nВыберите действие:")
+        print("1. 📋 Показать все курсы")
+        print("2. 🆕 Добавить новый курс")
+        print("3. 🔍 Найти курс по ID")
+        print("0. ↩  Назад в главное меню")
+
+        choice = input("\nВаш выбор: ").strip()
+
+        if choice == "1":
+            clear_screen()
+            print_header("ВСЕ КУРСЫ")
+            courses = service.courses.get_all()
+            show_courses_table(courses)
+            wait_for_enter()
+
+        elif choice == "2":
+            clear_screen()
+            print_header("ДОБАВЛЕНИЕ КУРСА")
+            try:
+                course = input_course_data()
+                course_id = service.courses.create(course)
+                print(f"\n✅ Курс успешно добавлен! ID: {course_id}")
+            except Exception as e:
+                print(f"\n❌ Ошибка при добавлении: {e}")
+            wait_for_enter()
+
+        elif choice == "3":
+            clear_screen()
+            print_header("ПОИСК КУРСА ПО ID")
+            try:
+                course_id = int(input("Введите ID курса: "))
+                course = service.courses.get_by_id(course_id)
+
+                if course:
+                    print(f"\n✅ Найден курс:")
+                    show_courses_table([course])
+                else:
+                    print(f"\n❌ Курс с ID {course_id} не найден")
+            except ValueError:
+                print("❌ Неверный формат ID")
+
+            wait_for_enter()
+
+        elif choice == "0":
+            break
+        else:
+            print("❌ Неверный выбор. Попробуйте снова.")
+            wait_for_enter()
+
+
+def menu_enrollments(service: SchoolService) -> None:
+    """Меню записей на курсы."""
+    while True:
+        clear_screen()
+        print_header("ЗАПИСИ НА КУРСЫ")
+
+        print("\nВыберите действие:")
+        print("1. 📝 Записать студента на курс")
+        print("2. 👨‍🎓 Показать студентов на курсе")
+        print("3. 🏙  Показать студентов на курсе из города")
+        print("0. ↩  Назад в главное меню")
+
+        choice = input("\nВаш выбор: ").strip()
+
+        if choice == "1":
+            clear_screen()
+            print_header("ЗАПИСЬ СТУДЕНТА НА КУРС")
+
+            students = service.students.get_all()
+            if not students:
+                print("❌ В базе нет студентов")
+                wait_for_enter()
+                continue
+
+            print("Доступные студенты:")
+            show_students_table(students)
+
+            courses = service.courses.get_all()
+            if not courses:
+                print("\n❌ В базе нет курсов")
+                wait_for_enter()
+                continue
+
+            print("\nДоступные курсы:")
+            show_courses_table(courses)
+
+            try:
+                student_id = int(input("\nВведите ID студента: "))
+                course_id = int(input("Введите ID курса: "))
+
+                if service.enrollments.enroll(student_id, course_id):
+                    print("✅ Студент успешно записан на курс!")
+                else:
+                    print("❌ Ошибка: студент уже записан на этот курс")
+
+            except ValueError:
+                print("❌ Неверный формат ID")
+            except Exception as e:
+                print(f"❌ Ошибка: {e}")
+
+            wait_for_enter()
+
+        elif choice == "2":
+            clear_screen()
+            print_header("СТУДЕНТЫ НА КУРСЕ")
+
+            courses = service.courses.get_all()
+            if not courses:
+                print("❌ В базе нет курсов")
+                wait_for_enter()
+                continue
+
+            show_courses_table(courses)
+
+            course_name = input("\nВведите название курса: ").strip()
+            students = service.enrollments.get_students_on_course(course_name)
+
+            if students:
+                print(f"\n📊 Студенты на курсе '{course_name}':")
+                show_students_table(students)
+            else:
+                print(f"\n❌ На курсе '{course_name}' нет студентов или курс не существует")
+
+            wait_for_enter()
+
+        elif choice == "3":
+            clear_screen()
+            print_header("СТУДЕНТЫ НА КУРСЕ ИЗ ГОРОДА")
+
+            courses = service.courses.get_all()
+            if not courses:
+                print("❌ В базе нет курсов")
+                wait_for_enter()
+                continue
+
+            show_courses_table(courses)
+
+            course_name = input("\nВведите название курса: ").strip()
+            city = input("Введите город: ").strip()
+
+            students = service.enrollments.get_students_on_course_from_city(course_name, city)
+
+            if students:
+                print(f"\n📊 Студенты на курсе '{course_name}' из города '{city}':")
+                show_students_table(students)
+            else:
+                print(f"\n❌ На курсе '{course_name}' нет студентов из города '{city}'")
+
+            wait_for_enter()
+
+        elif choice == "0":
+            break
+        else:
+            print("❌ Неверный выбор. Попробуйте снова.")
+            wait_for_enter()
+
+
+def menu_queries(service: SchoolService) -> None:
+    """Меню специальных запросов."""
+    while True:
+        clear_screen()
+        print_header("СПЕЦИАЛЬНЫЕ ЗАПРОСЫ")
+
+        print("\nВыберите запрос:")
+        print("1. 🎂 Студенты старше указанного возраста")
+        print("2. 🏙  Студенты из указанного города")
+        print("0. ↩  Назад в главное меню")
+
+        choice = input("\nВаш выбор: ").strip()
+
+        if choice == "1":
+            clear_screen()
+            print_header("СТУДЕНТЫ СТАРШЕ ВОЗРАСТА")
+
+            try:
+                age = int(input("Введите возраст: "))
+                students = service.students.get_by_age_gt(age)
+
+                if students:
+                    print(f"\n📊 Студенты старше {age} лет:")
+                    show_students_table(students)
+                else:
+                    print(f"\n❌ Нет студентов старше {age} лет")
+
+            except ValueError:
+                print("❌ Неверный формат возраста")
+
+            wait_for_enter()
+
+        elif choice == "2":
+            clear_screen()
+            print_header("СТУДЕНТЫ ИЗ ГОРОДА")
+
+            city = input("Введите город: ").strip()
+            students = service.students.get_by_city(city)
+
+            if students:
+                print(f"\n📊 Студенты из города '{city}':")
+                show_students_table(students)
+            else:
+                print(f"\n❌ Нет студентов из города '{city}'")
+
+            wait_for_enter()
+
+        elif choice == "0":
+            break
+        else:
+            print("❌ Неверный выбор. Попробуйте снова.")
+            wait_for_enter()
+
+
+def main_menu() -> None:
+    """Главное меню приложения."""
+    with DatabaseManager() as service:
+        while True:
+            clear_screen()
+            print_header("ГЛАВНОЕ МЕНЮ - ШКОЛЬНАЯ СИСТЕМА")
+            print(f"📊 Статистика: {service.get_students_count()} студентов, {service.get_courses_count()} курсов")
+
+            print("\nВыберите раздел:")
+            print("1. 👨‍🎓 Управление студентами")
+            print("2. 🎯 Управление курсами")
+            print("3. 📚 Записи на курсы")
+            print("4. 🔍 Специальные запросы")
+            print("0. 🚪 Выход")
+            print("-" * 50)
+
+            choice = input("Ваш выбор: ").strip()
+
+            if choice == "1":
+                menu_manage_students(service)
+            elif choice == "2":
+                menu_manage_courses(service)
+            elif choice == "3":
+                menu_enrollments(service)
+            elif choice == "4":
+                menu_queries(service)
+            elif choice == "0":
+                print("\n👋 До свидания!")
+                break
+            else:
+                print("❌ Неверный выбор. Попробуйте снова.")
+                wait_for_enter()
+
 
 def main() -> None:
-    """
-    Основная функция для запуска демонстрации ORM системы.
-    Выполняет:
-    1. Инициализацию базы данных
-    2. Заполнение тестовыми данными
-    3. Демонстрацию всех возможностей ORM
-    """
+    """Главная функция приложения."""
+    clear_screen()
+    print("=" * 70)
+    print("        🎓 ШКОЛЬНАЯ ORM СИСТЕМА ")
+    print("=" * 70)
+    print("📁 База данных:", os.path.abspath('school_optimized.db'))
+    print("\nНажмите Enter чтобы начать...")
+    input()
+
     try:
-        # Создание экземпляра ORM
-        school_orm = SchoolORM()
-
-        # Инициализация структуры базы данных
-        print("Инициализация базы данных...")
-        school_orm.initialize()
-
-        # Заполнение тестовыми данными
-        print("Заполнение тестовыми данными...")
-        school_orm.setup_test_data()
-
-        # Демонстрация возможностей
-        demonstrate_orm_capabilities()
-
-        print("\n=== ДЕМОНСТРАЦИЯ ЗАВЕРШЕНА ===")
+        main_menu()
+        print(f"\n✅ Программа успешно завершена!")
+        print(f"📁 Файл базы данных: {os.path.abspath('school_optimized.db')}")
 
     except Exception as e:
-        print(f"Произошла ошибка: {e}")
-        # В реальном приложении здесь должно быть логирование ошибки
+        print(f"\n❌ Критическая ошибка: {e}")
+        import traceback
+        traceback.print_exc()
 
 
-# Точка входа в программу
 if __name__ == "__main__":
     main()
+
+
