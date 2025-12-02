@@ -1,7 +1,3 @@
-# Уровень 3.
-#
-# Напишите ORM для этой базы данных, то есть функции, которые
-# позволят быстро выполнять данные запросы без дублирования кода SQL.
 
 # Уровень 3.
 #
@@ -19,7 +15,7 @@ from dataclasses import dataclass
 
 
 # =============================================================================
-# ENTITY LAYER (СЛОЙ СУЩНОСТЕЙ)
+# ENTITY LAYER
 # =============================================================================
 
 @dataclass
@@ -32,7 +28,7 @@ class Student:
     city: str = ""
 
     def __str__(self) -> str:
-        return f"{self.name} {self.surname}, {self.age} лет, {self.city}"
+        return f"{self.name}, {self.surname}, {self.age}, {self.city}"
 
     @classmethod
     def from_row(cls, row) -> 'Student':
@@ -67,7 +63,7 @@ class Course:
 
 
 # =============================================================================
-# REPOSITORY LAYER (СЛОЙ ДОСТУПА К ДАННЫМ)
+# REPOSITORY LAYER
 # =============================================================================
 
 class StudentRepository:
@@ -1033,4 +1029,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
